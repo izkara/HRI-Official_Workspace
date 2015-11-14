@@ -26,6 +26,7 @@ Description:
 #include <iostream>
 #include <cstdio>
 #include <cassert>
+#include <Windows.h>
 
 #include <HD/hd.h>
 
@@ -41,11 +42,14 @@ Description:
 #include <cmath>
 using namespace std;
 
-static double sphereRadius = 5.0;
+bool buttonPushed = false;
+char controlChar = ' ';
+static double sphereRadius = 3.0;
 static double mySphereRadius = 3;
+double heightThreshold = 2;
 static hduVector3Dd pos_prev(0.01, 0.01, 0.01);
 static hduVector3Dd pos(0.01, 0.01, 0.01);
-static double vel_target = 0.05;
+static double vel_target = 0.02;
 double vel = 0;
 int count = 0;
 static int period = 1000;
@@ -62,11 +66,12 @@ void handleIdle(void);
 
 
 
-hduVector3Dd forceField(hduVector3Dd pos, hduVector3Dd* shape, int shape_size);
+hduVector3Dd forceField(hduVector3Dd pos, hduVector3Dd** shape, int* shape_sizes);
 
 
-hduVector3Dd* Shape;
-int Shape_size = 0;
+hduVector3Dd** Shape;
+int* Shape_sizes; 
+int Shape_count;
 
 /* Haptic device record. */
 struct DeviceDisplayState
@@ -100,57 +105,59 @@ HDCallbackCode HDCALLBACK DeviceStateCallback(void *pUserData)
 *******************************************************************************/
 void displayFunction(void)
 {
-    // Setup model transformations.
-    glMatrixMode(GL_MODELVIEW); 
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	// Setup model transformations.
+	glMatrixMode(GL_MODELVIEW);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    glPushMatrix();
+	glPushMatrix();
 
-    setupGraphicsState();
-    drawAxes(sphereRadius*2.0);
+	setupGraphicsState();
+	drawAxes(sphereRadius*2.0);
 
-    // Draw the fixed sphere.
+	// Draw the fixed sphere.
    // static const hduVector3Dd fixedSpherePosition(0, 0, 0);
-    static const float fixedSphereColor[4] = {.2, .8, .8, .8};
-    GLUquadricObj* pQuadObj = gluNewQuadric();
-   // drawSphere(pQuadObj, fixedSpherePosition, fixedSphereColor, sphereRadius);
+	static const float fixedSphereColor[4] = { .2, .8, .8, .8 };
+	GLUquadricObj* pQuadObj = gluNewQuadric();
+	// drawSphere(pQuadObj, fixedSpherePosition, fixedSphereColor, sphereRadius);
 
-    // Get the current position of end effector.
-    DeviceDisplayState state;
-    hdScheduleSynchronous(DeviceStateCallback, &state,
-                          HD_MIN_SCHEDULER_PRIORITY);
+	 // Get the current position of end effector.
+	DeviceDisplayState state;
+	hdScheduleSynchronous(DeviceStateCallback, &state,
+		HD_MIN_SCHEDULER_PRIORITY);
 
-    // Draw a sphere to represent the haptic cursor and the dynamic 
-    // charge.
-    static const float dynamicSphereColor[4] = { .8, .2, .2, .8 };
-    drawSphere(pQuadObj, 
-               state.position,
-               dynamicSphereColor,
-               sphereRadius);    
+	// Draw a sphere to represent the haptic cursor and the dynamic 
+	// charge.
+	static const float dynamicSphereColor[4] = { .8, .2, .2, .8 };
+	drawSphere(pQuadObj,
+		state.position,
+		dynamicSphereColor,
+		sphereRadius);
 
-	for (int i = 0; i < Shape_size; i++)
-	{
-		//glBegin(GL_POINTS); //starts drawing of points
+	for (int j = 0; j < Shape_count; j++) {
+		for (int i = 0; i < Shape_sizes[j]; i++)
+		{
+			//glBegin(GL_POINTS); //starts drawing of points
 
-		//glVertex3f(Shape[0][0], Shape[0][1], Shape[0][2]);//upper-right corner
+			//glVertex3f(Shape[0][0], Shape[0][1], Shape[0][2]);//upper-right corner
 
-		GLUquadricObj* pQuadObj1 = gluNewQuadric();
-		drawSphere(pQuadObj1, Shape[i], fixedSphereColor, mySphereRadius);
-		
+			GLUquadricObj* pQuadObj1 = gluNewQuadric();
+			drawSphere(pQuadObj1, Shape[j][i], fixedSphereColor, mySphereRadius);
 
-		//glEnd();//end drawing of points
+
+			//glEnd();//end drawing of points
+		}
 	}
 
-
-    // Create the force vector.
-    hduVector3Dd forceVector = 40.0 * forceField(state.position, Shape, Shape_size);
+	// Create the force vector.
+	hduVector3Dd forceVector = 40.0 * forceField(state.position, Shape, Shape_sizes);
 	//if (forceVector.magnitude() > 40.0) forceVector = normalize(forceVector) * 40.0;
 
-    drawForceVector(pQuadObj,
-                    state.position,
-                    forceVector,
-                    sphereRadius*.1);
 
+	drawForceVector(pQuadObj,
+		state.position,
+		forceVector,
+		sphereRadius*.1);
+	
     gluDeleteQuadric(pQuadObj);
   
     glPopMatrix();
@@ -194,7 +201,7 @@ int timeFrame = 0;
 /*******************************************************************************
  Given the position is space, calculates the (modified) coulomb force.
 *******************************************************************************/
-hduVector3Dd forceField(hduVector3Dd pos, hduVector3Dd* shape, int shape_size)
+hduVector3Dd forceField(hduVector3Dd pos, hduVector3Dd** shape, int* shape_sizes)
 {
 	double scaleInside = 1.0;
 	double scaleFar = 6.0; // 12.0;
@@ -202,19 +209,82 @@ hduVector3Dd forceField(hduVector3Dd pos, hduVector3Dd* shape, int shape_size)
 	double springK = 1.0;
 	double controlK = 80.0;
 
+	if (GetAsyncKeyState(0x46)) {
+		if (!buttonPushed) {
+			buttonPushed = true;
+			cout << "Vel_Target is: " << vel_target << "\n";
+			controlChar = 'F';
+		}
+	}
+	else if (GetAsyncKeyState(0x48)) {
+		if (!buttonPushed) {
+			buttonPushed = true;
+			cout << "Height is : " << heightThreshold << "\n";
+			controlChar = 'H';
+		}
+	}
+	else if (GetAsyncKeyState(0x53)) {
+		if (!buttonPushed) {
+			buttonPushed = true;
+			cout << "Sphere size is: " << sphereRadius << "\n";
+			controlChar = 'S';
+		}
+	}
+	else if (GetAsyncKeyState(VK_UP)) {
+		if (!buttonPushed) {
+			buttonPushed = true;
+			switch (controlChar) {
+			case('F') :
+				vel_target += .01;
+				cout << "vel_target increased: " << vel_target << "\n";
+				break;
+			case('H') :
+				heightThreshold += .01;
+				break;
+			case('S') :
+				sphereRadius += .5;
+				break;
+			}
+		}
+	}
+	else if (GetAsyncKeyState(VK_DOWN)) {
+		if (!buttonPushed) {
+			buttonPushed = true;
+			switch (controlChar) {
+			case('F') :
+				vel_target -= .01;
+				cout << "vel_target increased: " << vel_target << "\n";
+				break;
+			case('H') :
+				heightThreshold -= .01;
+				break;
+			case('S') :
+				sphereRadius -= .5;
+				break;
+			}
+		}
+	}
+	else {
+		buttonPushed = false;
+	}
+
+
+
 	hduVector3Dd forceVec(0, 0, 0);
 	timeFrame++;
 
 	//only for single cruve
-	for (int i = 0; i < shape_size; i++) {
-		hduVector3Dd diff = pos - shape[i];
-		double dist = diff.magnitude();
-		double pointDist = (shape[i] - shape[i + 1]).magnitude();
-
-			// if two charges overlap...
-			if (dist < sphereRadius*2.0)// && i < shape_size && pointDist < 1.0)
+	for (int j = 0; j < Shape_count; j++) {
+		for (int i = 0; i < shape_sizes[j]; i++) {
+			hduVector3Dd diff = pos - shape[j][i];
+			double dist = diff.magnitude();
+			double pointDist = (shape[j][i] - shape[j][i + 1]).magnitude();
+			double heightDist = abs(shape[j][i][1] - pos[1]);
+			//cout << "HeightDist: " << heightDist << "\n";
+				// if two charges overlap...
+			if (dist < sphereRadius*2.0 && heightDist < heightThreshold)// && i < shape_size && pointDist < 1.0)
 			{
-				if (i == 0 || i == Shape_size) return -springK*diff;
+				if (i == 0 || i == Shape_sizes[j]) return -springK*diff;
 				// Attract the charge to the center of the sphere.
 				hduVector3Dd unitPos = normalize(diff);
 				//cout << "||| x = " << unitPos[0] << " y = " << unitPos[1] << " z = " << unitPos[2] << "\n";
@@ -227,20 +297,26 @@ hduVector3Dd forceField(hduVector3Dd pos, hduVector3Dd* shape, int shape_size)
 				cout << vel - vel_target << endl;
 				//return -scaleClose*unitPos;
 				//unitPos[1] = 0;
+
+				/*if (i > shape_sizes[j]) vel_target = abs(vel_target);
+				else {
+					if (vel_target > 0) vel_target *= -1;
+				}*/
 				double control_scale = controlK*(vel - vel_target);
 				return control_scale*unitPos;
 			}
-		
-		else
-		{
-			hduVector3Dd unitPos = normalize(diff);
-			forceVec += -scaleFar*unitPos / (dist*dist);
-			//cout << "FORCEVEC: " << forceVec.magnitude() << '\n';
+
+			else
+			{
+				hduVector3Dd unitPos = normalize(diff);
+				forceVec += -scaleFar*unitPos / (dist*dist);
+				//cout << "FORCEVEC: " << forceVec.magnitude() << '\n';
+			}
 		}
 	}
 
 		forceVec *= charge;
-		
+		//cout << "forceVecX: " << forceVec[0] << "\nforceVecY: " << forceVec[1] << "\nforceVecZ: " << forceVec[2] << "\n";
 		return forceVec;
 	
 }
@@ -253,18 +329,16 @@ HDCallbackCode HDCALLBACK CoulombCallback(void *data)
     HHD hHD = hdGetCurrentDevice();
 
     hdBeginFrame(hHD);
-	cout << "Test";
 	count++;
 	if (count == period) {
-		pos_prev = pos; count == 0;
+		pos_prev = pos; count = 0;
 		vel = sqrt((pos[0] - pos_prev[0])*(pos[0] - pos_prev[0]) + (pos[2] - pos_prev[2])*(pos[2] - pos_prev[2]));
 	}
 	hdGetDoublev(HD_CURRENT_POSITION, pos);
-	cout << "Test";
 	
     
 	hduVector3Dd forceVec;
-	forceVec = forceField(pos, Shape, Shape_size);
+	forceVec = forceField(pos, Shape, Shape_sizes);
     hdSetDoublev(HD_CURRENT_FORCE, forceVec);
         
     hdEndFrame(hHD);
@@ -329,33 +403,55 @@ void exitHandler()
 
 void parse(string fileName)
 {
-		double offset = 40;
-	   //cout << "Parse called" << endl;
+		double offset = 20;
 		ifstream stream1(fileName);		
 		string line;
+		int shapeSize = 0;
 		double coords[3];
-		//cout << "At while" << endl;
+		hduVector3Dd *tempShape;
+
 		while (getline(stream1, line)) {
-			if (line.length() > 0 && line.substr(0, 2) == "v ") {
-				Shape_size++;
+			if (line.length() > 0 && line.substr(0, 1) == "n") {
+				Shape_count++;
 			}
 		}
-		//cout<<Shape_size << endl;
-		Shape = new hduVector3Dd[Shape_size];
+		Shape = new hduVector3Dd*[Shape_count];
+		Shape_sizes = new int[Shape_count];
 
+
+
+		int currentShape = 0;
+		ifstream stream2(fileName);
+
+		//cout << "Shapecount: " << Shape_count << "\n";
+		while (getline(stream2, line)) {
+			//cout << "first char is : " << line.substr(0, 1) << "\n";
+			if (line.length() > 0 && line.substr(0, 2) == "v ") {
+				shapeSize++;
+			}
+			else if (line.length() > 0 && line.substr(0, 1) == "e") {
+				//cout << "currentshape: " << currentShape << "\n";
+				Shape_sizes[currentShape] = shapeSize;
+				Shape[currentShape] = new hduVector3Dd[shapeSize];
+				shapeSize = 0;
+				//cout << "moving on to shape: " << currentShape << "\n";
+				//cout << currentShape << "'s shape is size: " << Shape_sizes[currentShape] << "\n";
+
+				currentShape++;
+			}
+		}
+
+		/*cout << "ShapeCount0: " << Shape_sizes[0] << "\n";
+		cout << "ShapeCount1: " << Shape_sizes[1] << "\n";
+		cout << "ShapeCount2: " << Shape_sizes[2] << "\n";*/
+
+
+		currentShape = 0;
 		ifstream stream(fileName);
 		int j = 0;
 		while (getline(stream, line)) {
-			//cout << "start getline while\n";
-			
-			//cout << "Line Length: " << line.length() << "\n";
-			
 			if (line.length() > 0 && line.substr(0, 2) == "v ") {
-
-				//cout << "Line[0]: " << line[0] << "\n";
-				//cout << "STARTING WITH V" << "\n";
 				size_t i = 2;
-
 				for (int coord = 0; coord < 3; coord++) {
 					//for each coordinate find corresponding substring n and convert to float
 					string number;
@@ -369,30 +465,43 @@ void parse(string fileName)
 					count++;
 
 					number = line.substr(i - count, count);
-					coords[coord] = stod(number) * 10;
+					coords[coord] = stod(number) * 15;
+					//cout << "coords[coord]: " << coords[coord] << "\n";
+				}
+				hduVector3Dd vc(coords[0], coords[1], coords[2]);//coords[2] - offset, coords[1]);//
 
+				if (currentShape >= Shape_count)
+				{
+					cout << "CURRENT SHAPE IS BIGGER THAN SHAPE COUNT!\n";
+					continue;
 				}
-				if (coords[0] == 0 && coords[1] == 0 && coords[2] == 0) {
-					cout << "line number is " << j << "\n";
-				}
-				//cout << "||| x = " << coords[0] << " y = " << coords[1] << " z = " << coords[2] << "\n";
-				hduVector3Dd vc(coords[0], coords[2] - offset, coords[1]);//coords[1], coords[2]);//
-				Shape[j] = vc;
+				/*cout << "currentShape: " << currentShape << "\n";
+				cout << "j: " << j << "\n";
+*/
+				Shape[currentShape][j] = vc;
+
 				j++;
 			}
-
-			//cout << "exited if statement\n";
+			//cout << " shapeSize: " << Shape_sizes[currentShape] << "\n";
+			else if (line.substr(0, 1) == "e" || j == Shape_sizes[currentShape]) {
+				//cout << line << "\n";
+				cout << "NEW SHAPE!\n";
+				currentShape++;
+				
+				j = 0;
+			}
 		}
-
-		//cout << "exited parse\n";
 		return;
 }
 
-void print(hduVector3Dd* Shape, int Shape_size) {
-	for (int i = 0; i < Shape_size; i++)
-	{
-		//getchar();
-		cout << "x = " << Shape[i][0] << " y = " << Shape[i][1] << " z = " << Shape[i][2] << "\n";
+void print(hduVector3Dd** Shape) {
+	cout << "ShapeCount: " << Shape_count << "\n";
+	for (int j = 0; j < Shape_count; j++) {
+		cout << "shape size at " << j << "th shape: " << Shape_sizes[j] << "\n";
+		for (int i = 0; i < Shape_sizes[j]; i++)
+		{
+			cout << "x = " << Shape[j][i][0] << " y = " << Shape[j][i][1] << " z = " << Shape[j][i][2] << "\n";
+		}
 	}
 }
 
@@ -411,18 +520,18 @@ int main(int argc, char* argv[])
     printf("Starting application\n");
     
     atexit(exitHandler);
-	cout << "Enter file name:" << endl;
-	string file_name;
-	cin >> file_name;
-	string file_path = "models/" + file_name;
+	cout << "Drag OBJ here:" << endl;
+	string file_name = "C:/Users/Yeliz/Documents/Processing/projects/drawingObj/drawing_23_28_39.obj";
+	//cin >> file_name;
+	string file_path = file_name;//"models/" + file_name;
 
 	glPointSize(10.0f);
 	cout << "entering parse\n";
 	parse(file_path);
 	cout << "exiting parse\n";
-	cout << "entering print\n";
-	print(Shape, Shape_size);
-	cout << "exiting print\n";
+	/*cout << "entering print\n";
+	print(Shape);
+	cout << "exiting print\n";*/
 
 
 
@@ -466,7 +575,14 @@ int main(int argc, char* argv[])
     // Application loop.
     CoulombForceField();
 
+
+	for (int i = 0; i < Shape_count; i++)
+	{
+		delete[] Shape[i];
+	}
 	delete[] Shape;
+	delete[] Shape_sizes;
+	
 
     printf("Done\n");
     return 0;
