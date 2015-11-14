@@ -49,10 +49,15 @@ static double mySphereRadius = 3;
 double heightThreshold = 2;
 static hduVector3Dd pos_prev(0.01, 0.01, 0.01);
 static hduVector3Dd pos(0.01, 0.01, 0.01);
-static double vel_target = 0.02;
+static double vel_target = 0.01; //0.02;
 double vel = 0;
 int count = 0;
-static int period = 1000;
+static int period = 10;
+hduVector3Dd forceVec;
+const int n_history = 10;
+hduVector3Dd force_h[10];
+int force_index = 0;
+static double controlK = 1400.0;
 
 /* Charge (positive/negative) */
 int charge = 1;
@@ -207,12 +212,11 @@ hduVector3Dd forceField(hduVector3Dd pos, hduVector3Dd** shape, int* shape_sizes
 	double scaleFar = 6.0; // 12.0;
 	double scaleClose = 3.0; //3 //scaleFar/4/sphereRadius/sphereRadius;
 	double springK = 1.0;
-	double controlK = 80.0;
 
 	if (GetAsyncKeyState(0x46)) {
 		if (!buttonPushed) {
 			buttonPushed = true;
-			cout << "Vel_Target is: " << vel_target << "\n";
+			cout << "ControlK: " << controlK << "\n";
 			controlChar = 'F';
 		}
 	}
@@ -235,8 +239,8 @@ hduVector3Dd forceField(hduVector3Dd pos, hduVector3Dd** shape, int* shape_sizes
 			buttonPushed = true;
 			switch (controlChar) {
 			case('F') :
-				vel_target += .01;
-				cout << "vel_target increased: " << vel_target << "\n";
+				controlK += 10.0;
+				cout << "controlK increased: " << controlK << "\n";
 				break;
 			case('H') :
 				heightThreshold += .01;
@@ -252,8 +256,8 @@ hduVector3Dd forceField(hduVector3Dd pos, hduVector3Dd** shape, int* shape_sizes
 			buttonPushed = true;
 			switch (controlChar) {
 			case('F') :
-				vel_target -= .01;
-				cout << "vel_target increased: " << vel_target << "\n";
+				controlK -= 10.0;
+				cout << "controlK increased: " << controlK << "\n";
 				break;
 			case('H') :
 				heightThreshold -= .01;
@@ -294,7 +298,7 @@ hduVector3Dd forceField(hduVector3Dd pos, hduVector3Dd** shape, int* shape_sizes
 				//	//cout << "||| x = " << -scale*unitPos[0] << " y = " << -scale*unitPos[1] << " z = " << -scale*unitPos[2] << "\n";
 				//	timeFrame = 0;
 				//}
-				cout << vel - vel_target << endl;
+				//cout << vel - vel_target << endl;
 				//return -scaleClose*unitPos;
 				//unitPos[1] = 0;
 
@@ -333,13 +337,23 @@ HDCallbackCode HDCALLBACK CoulombCallback(void *data)
 	if (count == period) {
 		pos_prev = pos; count = 0;
 		vel = sqrt((pos[0] - pos_prev[0])*(pos[0] - pos_prev[0]) + (pos[2] - pos_prev[2])*(pos[2] - pos_prev[2]));
+		
 	}
+	forceVec = forceField(pos, Shape, Shape_sizes);
+	force_h[force_index] = forceVec;
+	hduVector3Dd forceSmoothed(0,0,0);
+	for (int i = 0; i < n_history; i++) {
+		forceSmoothed += force_h[i];
+	}
+	forceSmoothed /= (n_history + 0.0);
+	
+	hdSetDoublev(HD_CURRENT_FORCE, forceSmoothed);
 	hdGetDoublev(HD_CURRENT_POSITION, pos);
 	
     
-	hduVector3Dd forceVec;
-	forceVec = forceField(pos, Shape, Shape_sizes);
-    hdSetDoublev(HD_CURRENT_FORCE, forceVec);
+	//hduVector3Dd forceVec;
+	//forceVec = forceField(pos, Shape, Shape_sizes);
+    //hdSetDoublev(HD_CURRENT_FORCE, forceVec);
         
     hdEndFrame(hHD);
 
@@ -468,7 +482,7 @@ void parse(string fileName)
 					coords[coord] = stod(number) * 15;
 					//cout << "coords[coord]: " << coords[coord] << "\n";
 				}
-				hduVector3Dd vc(coords[0], coords[1], coords[2]);//coords[2] - offset, coords[1]);//
+				hduVector3Dd vc(coords[0], coords[2] - offset, coords[1]);//coords[1], coords[2]);//
 
 				if (currentShape >= Shape_count)
 				{
@@ -515,14 +529,19 @@ void print(hduVector3Dd** Shape) {
 ******************************************************************************/
 int main(int argc, char* argv[])
 {
-    HDErrorInfo error;
+	hduVector3Dd force_zero(0, 0, 0);
+	for(int i = 0; i < n_history; i++) {
+		force_h[i] = force_zero;
+	}
+	
+	HDErrorInfo error;
 
     printf("Starting application\n");
     
     atexit(exitHandler);
 	cout << "Drag OBJ here:" << endl;
-	string file_name = "C:/Users/Yeliz/Documents/Processing/projects/drawingObj/drawing_23_28_39.obj";
-	//cin >> file_name;
+	string file_name ;//= "C:/OpenHaptics/Developer/3.4.0/examples/HD/graphics/HRI-Official_Workspace\drawingObj/drawing_23_28_39.obj";
+	cin >> file_name;
 	string file_path = file_name;//"models/" + file_name;
 
 	glPointSize(10.0f);
@@ -583,7 +602,6 @@ int main(int argc, char* argv[])
 	delete[] Shape;
 	delete[] Shape_sizes;
 	
-
     printf("Done\n");
     return 0;
 }
