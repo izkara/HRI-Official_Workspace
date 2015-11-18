@@ -58,7 +58,7 @@ const int n_history = 10;
 hduVector3Dd force_h[10];
 int force_index = 0;
 static double controlK = 1400.0;
-double offset = 20;
+double offset = 40;
 
 /* Charge (positive/negative) */
 int charge = 1;
@@ -275,9 +275,10 @@ hduVector3Dd forceField(hduVector3Dd pos, hduVector3Dd** shape, int* shape_sizes
 
 
 
-	hduVector3Dd forceVec(0, 0, 0);
+	hduVector3Dd forceVec(0.00001, 0.00001, 0.00001);
 	timeFrame++;
 
+	if (pos[1] > -offset + 25 || pos[1] < -offset - 25) return forceVec;
 	pos[1] = -offset;
 
 	//only for single cruve
