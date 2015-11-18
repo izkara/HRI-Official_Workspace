@@ -58,6 +58,7 @@ const int n_history = 10;
 hduVector3Dd force_h[10];
 int force_index = 0;
 static double controlK = 1400.0;
+double offset = 20;
 
 /* Charge (positive/negative) */
 int charge = 1;
@@ -277,6 +278,8 @@ hduVector3Dd forceField(hduVector3Dd pos, hduVector3Dd** shape, int* shape_sizes
 	hduVector3Dd forceVec(0, 0, 0);
 	timeFrame++;
 
+	pos[1] = -offset;
+
 	//only for single cruve
 	for (int j = 0; j < Shape_count; j++) {
 		for (int i = 0; i < shape_sizes[j]; i++) {
@@ -417,7 +420,6 @@ void exitHandler()
 
 void parse(string fileName)
 {
-		double offset = 20;
 		ifstream stream1(fileName);		
 		string line;
 		int shapeSize = 0;
